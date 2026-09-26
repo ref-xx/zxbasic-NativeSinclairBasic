@@ -146,6 +146,7 @@ def init():
     del gl.FUNCTION_LEVEL[:]
     del gl.FUNCTIONS[:]
     SYMBOL_TABLE = gl.SYMBOL_TABLE = src.api.symboltable.symboltable.SymbolTable()
+    init_custom_var_types()
 
     # DATAs info
     gl.DATA_LABELS_REQUIRED.clear()
@@ -155,6 +156,16 @@ def init():
     gl.DATA_PTR_CURRENT = src.api.utils.current_data_label()
     gl.DATA_FUNCTIONS = []
     gl.error_msg_cache.clear()
+
+
+def init_custom_var_types():
+    """Initializes custom variable types from command-line options"""
+    var_types = getattr(src.api.config.OPTIONS, "var_types", {})
+    if var_types:
+        for vname, vtype in var_types.items():
+            type_ref = make_type(vtype, 0, implicit=False)
+            if type_ref is not None:
+                SYMBOL_TABLE.declare_variable(vname, 0, type_ref)
 
 
 # ----------------------------------------------------------------------
@@ -1109,8 +1120,17 @@ class ZXBasicTransformer(Transformer):
             q[1] = SYMBOL_TABLE.access_var(q[1].name, get_lineno(items[i - 1]))
 
         q1class_ = q[1].class_ if q[1].token == "VAR" else CLASS.unknown
+        if (
+            getattr(src.api.config.OPTIONS, "default_float", False)
+            and q[1].type_ != Type.string
+            and not (isinstance(q[0], str) and q[0].endswith("$"))
+            and q[0] not in getattr(src.api.config.OPTIONS, "var_types", {})
+        ):
+            def_t = _TYPE(gl.DEFAULT_TYPE)
+        else:
+            def_t = q[1].type_
         variable = SYMBOL_TABLE.access_id(
-            q[0], get_lineno(items[i - 1]), default_type=q[1].type_, default_class=q1class_
+            q[0], get_lineno(items[i - 1]), default_type=def_t, default_class=q1class_
         )
 
         if variable is None:
@@ -1527,7 +1547,13 @@ class ZXBasicTransformer(Transformer):
                 warning(get_lineno(items[4]), "FOR start value is greater than end. This FOR loop is useless")
             if items[3].value < items[5].value and items[6].value < 0:
                 warning(get_lineno(items[1]), "FOR start value is lower than end. This FOR loop is useless")
-        id_type = common_type(common_type(items[3].type_, items[5].type_), items[6].type_)
+        if (
+            getattr(src.api.config.OPTIONS, "default_float", False)
+            and items[1] not in getattr(src.api.config.OPTIONS, "var_types", {})
+        ):
+            id_type = _TYPE(gl.DEFAULT_TYPE)
+        else:
+            id_type = common_type(common_type(items[3].type_, items[5].type_), items[6].type_)
         variable = SYMBOL_TABLE.access_var(items[1], get_lineno(items[1]), default_type=id_type)
         if variable is None:
             return p0

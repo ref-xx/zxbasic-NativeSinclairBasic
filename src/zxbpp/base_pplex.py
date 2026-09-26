@@ -6,17 +6,59 @@
 # --------------------------------------------------------------------
 
 import os
+import re
 import sys
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import StrEnum, unique
 
 from src.api import lex, utils
+from src.api.config import OPTIONS
 from src.zxbpp.prepro import output
 from src.zxbpp.prepro.builtinmacro import BuiltinMacro
 from src.zxbpp.prepro.definestable import DefinesTable
 
 EOL = "\n"
+
+
+def filter_basinc_metadata(text: str) -> str:
+    """Filters BasInc metadata lines (Check, Auto, #Note, Var, # Run-time Variables, etc.)
+    replacing them with empty lines to preserve line numbers.
+    """
+    lines = text.splitlines(keepends=True)
+    new_lines = []
+    in_runtime_vars = False
+
+    for line in lines:
+        s = line.strip()
+        lower = s.lower()
+        if lower.startswith("# run-time variables"):
+            in_runtime_vars = True
+            new_lines.append("\n")
+            continue
+        if lower.startswith("# end run-time variables"):
+            in_runtime_vars = False
+            new_lines.append("\n")
+            continue
+        if in_runtime_vars:
+            new_lines.append("\n")
+            continue
+        if (
+            lower.startswith("check ")
+            or lower.startswith("auto ")
+            or lower.startswith("var ")
+            or lower.startswith("#note ")
+            or (
+                s.startswith("#")
+                and not re.match(
+                    r"^#(include|define|undef|ifdef|ifndef|else|elif|endif|line|init|pragma)\b", s, re.IGNORECASE
+                )
+            )
+        ):
+            new_lines.append("\n")
+            continue
+        new_lines.append(line)
+    return "".join(new_lines)
 
 # Names for std input/output
 STDERR = "(stderr)"
@@ -114,6 +156,8 @@ class BaseLexer:
                 self.input_data = sys.stdin.read()
             else:
                 self.input_data = utils.read_txt_file(filename)
+            if getattr(OPTIONS, "basinc", False):
+                self.input_data = filter_basinc_metadata(self.input_data)
             if len(self.input_data) and self.input_data[-1] != EOL:
                 self.input_data += EOL
         except IOError:

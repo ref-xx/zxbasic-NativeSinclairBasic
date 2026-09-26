@@ -45,6 +45,18 @@ def parse_options(args: list[str] | None = None) -> Namespace:
     OPTIONS.array_base = options.array_base
     OPTIONS.string_base = options.string_base
     OPTIONS.sinclair = options.sinclair
+    OPTIONS.basinc = getattr(options, "basinc", False)
+    OPTIONS.default_float = getattr(options, "default_float", False)
+    var_types = {}
+    for vtype in ("ubyte", "byte", "uinteger", "integer", "ulong", "long", "float", "fixed"):
+        val_list = getattr(options, f"var{vtype}", None) or []
+        for val in val_list:
+            if val:
+                for vname in val.split(","):
+                    vname = vname.strip()
+                    if vname:
+                        var_types[vname] = vtype
+    OPTIONS.var_types = var_types
     OPTIONS.heap_size = options.heap_size
     OPTIONS.memory_check = options.debug_memory
     OPTIONS.strict_bool = options.strict_bool

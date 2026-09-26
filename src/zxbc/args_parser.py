@@ -127,6 +127,25 @@ def parser() -> argparse.ArgumentParser:
         help="Enable by default some more original ZX Spectrum Sinclair BASIC features: ATTR, SCREEN$, POINT",
     )
     parser_.add_argument(
+        "--basinc",
+        action="store_true",
+        help="Enable BasInc compatibility mode (skip BasInc metadata headers)",
+    )
+    parser_.add_argument(
+        "--default-float",
+        action="store_true",
+        help="Make all untyped variables default to Float (Sinclair BASIC compatibility)",
+    )
+    for vtype in ("ubyte", "byte", "uinteger", "integer", "ulong", "long", "float", "fixed"):
+        parser_.add_argument(
+            f"--var{vtype}",
+            f"--var-{vtype}",
+            type=str,
+            default=None,
+            action="append",
+            help=f"Comma-separated list of variables to type as {vtype.capitalize()}",
+        )
+    parser_.add_argument(
         "-H", "--heap-size", type=int, help=f"Sets heap size in bytes (default {OPTIONS.heap_size} bytes)"
     )
     parser_.add_argument("--heap-address", type=str, default=None, help="Sets the heap address.")

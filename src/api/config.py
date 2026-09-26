@@ -226,6 +226,9 @@ def init() -> None:
     OPTIONS(Action.ADD, name="__DEFINES", type=dict, default={})
     OPTIONS(Action.ADD, name=OPTION.EXPLICIT, type=bool, default=False, ignore_none=True)
     OPTIONS(Action.ADD, name="sinclair", type=bool, default=False)
+    OPTIONS(Action.ADD, name="basinc", type=bool, default=False)
+    OPTIONS(Action.ADD, name="default_float", type=bool, default=False)
+    OPTIONS(Action.ADD, name="var_types", type=dict, default={})
     OPTIONS(Action.ADD, name=OPTION.STRICT, type=bool, default=False, ignore_none=True)  # True to force type checking
     OPTIONS(Action.ADD, name=OPTION.ASM_ZXNEXT, type=bool, default=False, ignore_none=True)  # Enable ZX Next ASM
     OPTIONS(Action.ADD, name=OPTION.ARCH, type=str, default=None, ignore_none=True)  # Architecture
