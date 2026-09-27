@@ -60,6 +60,106 @@ def filter_basinc_metadata(text: str) -> str:
         new_lines.append(line)
     return "".join(new_lines)
 
+
+def transform_sinclair_deffn(text: str) -> str:
+    """Transforms Sinclair BASIC 'DEF FN' definitions and 'FN' calls
+    into Boriel ZX Basic compatible 'FUNCTION FN... / END FUNCTION'.
+    Prefixes function name with 'FN' to avoid conflicts with arrays.
+    Preserves line numbers, string literals, and REM comments.
+    """
+    lines = text.splitlines(keepends=True)
+    out_lines = []
+
+    for line in lines:
+        line_ending = "\n" if line.endswith("\n") else ""
+        raw_line = line.rstrip("\r\n")
+
+        # Split line into segments: string literals, REM comments, and code
+        segments = []
+        i = 0
+        n = len(raw_line)
+        in_str = False
+        cur = []
+
+        while i < n:
+            ch = raw_line[i]
+            if not in_str:
+                if ch == '"':
+                    if cur:
+                        segments.append(("code", "".join(cur)))
+                        cur = []
+                    in_str = True
+                    cur.append(ch)
+                    i += 1
+                    continue
+                elif (
+                    raw_line[i:i + 4].upper() == "REM "
+                    or raw_line[i:i + 4].upper() == "REM\t"
+                    or raw_line[i:].upper() == "REM"
+                ):
+                    if cur:
+                        segments.append(("code", "".join(cur)))
+                        cur = []
+                    segments.append(("rem", raw_line[i:]))
+                    cur = []
+                    i = n
+                    break
+                else:
+                    cur.append(ch)
+                    i += 1
+            else:
+                cur.append(ch)
+                if ch == '"':
+                    if i + 1 < n and raw_line[i + 1] == '"':
+                        cur.append('"')
+                        i += 2
+                        continue
+                    else:
+                        in_str = False
+                        segments.append(("str", "".join(cur)))
+                        cur = []
+                i += 1
+
+        if cur:
+            segments.append(("str" if in_str else "code", "".join(cur)))
+
+        # Process code segments
+        new_segments = []
+        for seg_type, seg_val in segments:
+            if seg_type != "code":
+                new_segments.append(seg_val)
+                continue
+
+            parts = seg_val.split(":")
+            new_parts = []
+            for part in parts:
+                m_def = re.match(
+                    r'^(\s*(?:\d+\s+)?)DEF\s+FN\s+([a-zA-Z_][a-zA-Z0-9_]*\$?)\s*(?:\((.*?)\))?\s*=\s*(.*)$',
+                    part,
+                    re.IGNORECASE,
+                )
+                if m_def:
+                    prefix = m_def.group(1) or ""
+                    fname = m_def.group(2)
+                    params = m_def.group(3)
+                    params_str = f"({params})" if params is not None else "()"
+                    expr = m_def.group(4).strip()
+                    fn_name = f"FN{fname}"
+                    part = f"{prefix}FUNCTION {fn_name}{params_str}: RETURN {expr}: END FUNCTION"
+                else:
+                    part = re.sub(
+                        r'\bFN\s+([a-zA-Z_][a-zA-Z0-9_]*\$?)',
+                        r'FN\1',
+                        part,
+                        flags=re.IGNORECASE,
+                    )
+                new_parts.append(part)
+            new_segments.append(":".join(new_parts))
+
+        out_lines.append("".join(new_segments) + line_ending)
+
+    return "".join(out_lines)
+
 # Names for std input/output
 STDERR = "(stderr)"
 STDIN = "(stdin)"
@@ -156,8 +256,10 @@ class BaseLexer:
                 self.input_data = sys.stdin.read()
             else:
                 self.input_data = utils.read_txt_file(filename)
-            if getattr(OPTIONS, "basinc", False) and (filename == STDIN or filename.lower().endswith(".bas")):
-                self.input_data = filter_basinc_metadata(self.input_data)
+            if filename == STDIN or filename.lower().endswith(".bas"):
+                if getattr(OPTIONS, "basinc", False):
+                    self.input_data = filter_basinc_metadata(self.input_data)
+                self.input_data = transform_sinclair_deffn(self.input_data)
             if len(self.input_data) and self.input_data[-1] != EOL:
                 self.input_data += EOL
         except IOError:
