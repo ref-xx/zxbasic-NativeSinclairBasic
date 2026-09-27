@@ -61,6 +61,173 @@ def filter_basinc_metadata(text: str) -> str:
     return "".join(new_lines)
 
 
+def split_dim_items(dims_str: str) -> list[str]:
+    """Splits comma-separated DIM items taking nested parentheses into account."""
+    items = []
+    cur = []
+    paren_depth = 0
+    for ch in dims_str:
+        if ch == '(':
+            paren_depth += 1
+            cur.append(ch)
+        elif ch == ')':
+            paren_depth -= 1
+            cur.append(ch)
+        elif ch == ',' and paren_depth == 0:
+            item = ''.join(cur).strip()
+            if item:
+                items.append(item)
+            cur = []
+        else:
+            cur.append(ch)
+    if cur:
+        item = ''.join(cur).strip()
+        if item:
+            items.append(item)
+    return items
+
+
+def parse_dim_item(item: str) -> tuple[str | None, list[str] | None]:
+    """Parses an item like 'a$(10)' or 'a$(10, 20)' or 'n(5)'."""
+    m = re.match(r'^([a-zA-Z_][a-zA-Z0-9_]*\$?)\s*\((.*)\)$', item.strip())
+    if not m:
+        return None, None
+    name = m.group(1)
+    inner = m.group(2).strip()
+    dims = split_dim_items(inner)
+    return name, dims
+
+
+def transform_dim_statement(dim_stmt: str) -> str:
+    """Transforms a single DIM statement (e.g. '10 DIM a$(10)' or 'DIM a$(10, 20)')."""
+    m = re.match(r'^(\s*(?:\d+\s+)?)DIM\s+(.*)$', dim_stmt.strip(), re.IGNORECASE)
+    if not m:
+        return dim_stmt
+
+    prefix = m.group(1) or ""
+    rest = m.group(2).strip()
+
+    raw_items = split_dim_items(rest)
+    if not raw_items:
+        return dim_stmt
+
+    has_string_array = any(
+        (parse_dim_item(it)[0] or "").endswith("$") for it in raw_items
+    )
+    if not has_string_array:
+        return dim_stmt
+
+    transformed_parts = []
+    numeric_dims = []
+
+    for raw_item in raw_items:
+        name, dims = parse_dim_item(raw_item)
+        if not name or not dims or not name.endswith("$"):
+            numeric_dims.append(raw_item)
+            continue
+
+        if len(dims) == 1:
+            # 1D string array in Sinclair BASIC = single fixed-length string of dims[0]
+            length = dims[0].strip()
+            transformed_parts.append(f"LET {name} = SPACE$({length})")
+        elif len(dims) == 2:
+            # 2D string array in Sinclair BASIC = dims[0] strings of length dims[1]
+            count = dims[0].strip()
+            length = dims[1].strip()
+            transformed_parts.append(
+                f"DIM {name}({count}): FOR __zxb_dim_k = 0 TO ({count}): LET {name}(__zxb_dim_k) = SPACE$({length}): NEXT __zxb_dim_k"
+            )
+        else:
+            outer_dims = ", ".join(d.strip() for d in dims[:-1])
+            transformed_parts.append(f"DIM {name}({outer_dims})")
+
+    statements = []
+    if numeric_dims:
+        statements.append(f"DIM {', '.join(numeric_dims)}")
+    statements.extend(transformed_parts)
+
+    return prefix + ": ".join(statements)
+
+
+def transform_sinclair_dim(text: str) -> str:
+    """Transforms Sinclair BASIC 'DIM v$(...)' statements for --basinc mode."""
+    lines = text.splitlines(keepends=True)
+    out_lines = []
+
+    for line in lines:
+        line_ending = "\n" if line.endswith("\n") else ""
+        raw_line = line.rstrip("\r\n")
+
+        # Split line into segments: string literals, REM comments, and code
+        segments = []
+        i = 0
+        n = len(raw_line)
+        in_str = False
+        cur = []
+
+        while i < n:
+            ch = raw_line[i]
+            if not in_str:
+                if ch == '"':
+                    if cur:
+                        segments.append(("code", "".join(cur)))
+                        cur = []
+                    in_str = True
+                    cur.append(ch)
+                    i += 1
+                    continue
+                elif (
+                    raw_line[i:i + 4].upper() == "REM "
+                    or raw_line[i:i + 4].upper() == "REM\t"
+                    or raw_line[i:].upper() == "REM"
+                ):
+                    if cur:
+                        segments.append(("code", "".join(cur)))
+                        cur = []
+                    segments.append(("rem", raw_line[i:]))
+                    cur = []
+                    i = n
+                    break
+                else:
+                    cur.append(ch)
+                    i += 1
+            else:
+                cur.append(ch)
+                if ch == '"':
+                    if i + 1 < n and raw_line[i + 1] == '"':
+                        cur.append('"')
+                        i += 2
+                        continue
+                    else:
+                        in_str = False
+                        segments.append(("str", "".join(cur)))
+                        cur = []
+                i += 1
+
+        if cur:
+            segments.append(("str" if in_str else "code", "".join(cur)))
+
+        # Process code segments
+        new_segments = []
+        for seg_type, seg_val in segments:
+            if seg_type != "code" or "DIM" not in seg_val.upper() or "$" not in seg_val:
+                new_segments.append(seg_val)
+                continue
+
+            parts = seg_val.split(":")
+            new_parts = []
+            for part in parts:
+                if re.search(r'\bDIM\b', part, re.IGNORECASE) and "$" in part:
+                    new_parts.append(transform_dim_statement(part))
+                else:
+                    new_parts.append(part)
+            new_segments.append(": ".join(new_parts))
+
+        out_lines.append("".join(new_segments) + line_ending)
+
+    return "".join(out_lines)
+
+
 def transform_sinclair_deffn(text: str) -> str:
     """Transforms Sinclair BASIC 'DEF FN' definitions and 'FN' calls
     into Boriel ZX Basic compatible 'FUNCTION FN... / END FUNCTION'.
@@ -259,6 +426,7 @@ class BaseLexer:
             if filename == STDIN or filename.lower().endswith(".bas"):
                 if getattr(OPTIONS, "basinc", False):
                     self.input_data = filter_basinc_metadata(self.input_data)
+                    self.input_data = transform_sinclair_dim(self.input_data)
                 self.input_data = transform_sinclair_deffn(self.input_data)
             if len(self.input_data) and self.input_data[-1] != EOL:
                 self.input_data += EOL
