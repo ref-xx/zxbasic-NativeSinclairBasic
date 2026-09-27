@@ -355,7 +355,8 @@ class OptimizerVisitor(UniqueVisitor):
 
     def visit_LETSUBSTR(self, node):
         if self.O_LEVEL > 1 and not node.children[0].accessed:
-            errmsg.warning_not_used(node.children[0].lineno, node.children[0].name)
+            fname = getattr(node.children[0], "filename", None)
+            errmsg.warning_not_used(node.children[0].lineno, node.children[0].name, fname=fname)
             yield self.NOP
         else:
             yield (yield self.generic_visit(node))

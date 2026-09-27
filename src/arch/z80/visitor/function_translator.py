@@ -57,7 +57,8 @@ class FunctionTranslator(Translator):
 
         for local_var in node.local_symbol_table.values():
             if not local_var.accessed:  # HINT: This should never happen as values() is already filtered
-                src.api.errmsg.warning_not_used(local_var.lineno, local_var.name)
+                fname = getattr(local_var, "filename", None) or getattr(node, "filename", None)
+                src.api.errmsg.warning_not_used(local_var.lineno, local_var.name, fname=fname)
                 # HINT: Cannot optimize local variables now, since the offsets are already calculated
                 # if self.O_LEVEL > 1:
                 #    return

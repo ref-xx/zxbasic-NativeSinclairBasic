@@ -89,16 +89,28 @@ def error(lineno: int, msg: str, fname: str | None = None) -> None:
     global_.has_errors += 1
 
 
+def is_system_library_file(fname: str | None) -> bool:
+    """Returns True if the file belongs to Boriel's stdlib or internal runtime."""
+    if not fname or fname == "(stdin)":
+        return False
+    norm = fname.replace("\\", "/").lower()
+    return bool(re.search(r"(?:^|/)(?:src/lib|stdlib|runtime)/", norm))
+
+
 def warning(lineno: int, msg: str, fname: str | None = None) -> None:
     """Generic warning error routine"""
     if getattr(global_, "syntax_error_occurred", False):
         return
-    global_.has_warnings += 1
-    if global_.has_warnings <= config.OPTIONS.expected_warnings:
-        return
 
     if fname is None:
         fname = global_.FILENAME
+
+    if is_system_library_file(fname) and config.OPTIONS.debug_level < 3:
+        return
+
+    global_.has_warnings += 1
+    if global_.has_warnings <= config.OPTIONS.expected_warnings:
+        return
 
     basic_line = get_basic_line_number(fname, lineno)
     line_info = f"[line {basic_line}] " if basic_line is not None else ""
@@ -153,6 +165,9 @@ def warning_command_line_flag_deprecation(flag: str) -> None:
 @register_warning("100")
 def warning_implicit_type(lineno: int, id_: str, type_: str = None):
     """Warning: Using default implicit type 'x'"""
+    if id_.startswith("__zxb_"):
+        return
+
     if config.OPTIONS.strict:
         syntax_error_undeclared_type(lineno, id_)
         return
@@ -196,6 +211,8 @@ def warning_empty_if(lineno: int):
 @register_warning("150")
 def warning_not_used(lineno: int, id_: str, kind: str = "Variable", fname: str | None = None):
     """Emits an optimization warning"""
+    if id_.startswith("__zxb_"):
+        return
     if config.OPTIONS.optimization_level > 0:
         warning(lineno, "%s '%s' is never used" % (kind, id_), fname=fname)
 
