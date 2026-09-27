@@ -51,7 +51,7 @@ def filter_basinc_metadata(text: str) -> str:
             or (
                 s.startswith("#")
                 and not re.match(
-                    r"^#(include|define|undef|ifdef|ifndef|else|elif|endif|line|init|pragma)\b", s, re.IGNORECASE
+                    r"^#\s*(include|define|undef|ifdef|ifndef|else|elif|endif|line|init|pragma)\b", s, re.IGNORECASE
                 )
             )
         ):
@@ -156,7 +156,7 @@ class BaseLexer:
                 self.input_data = sys.stdin.read()
             else:
                 self.input_data = utils.read_txt_file(filename)
-            if getattr(OPTIONS, "basinc", False):
+            if getattr(OPTIONS, "basinc", False) and (filename == STDIN or filename.lower().endswith(".bas")):
                 self.input_data = filter_basinc_metadata(self.input_data)
             if len(self.input_data) and self.input_data[-1] != EOL:
                 self.input_data += EOL

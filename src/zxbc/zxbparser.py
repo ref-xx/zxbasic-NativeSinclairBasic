@@ -3062,6 +3062,8 @@ class ZXBasicTransformer(Transformer):
                 warning(get_lineno(items[0]), f"Invalid string numeric constant '{s}' evaluated as 0")
             return x
 
+        if items[1] is None:
+            return None
         if items[1].type_ != Type.string:
             errmsg.syntax_error_expected_string(get_lineno(items[0]), Type.to_string(items[1].type_))
             p0 = None
@@ -3090,6 +3092,8 @@ class ZXBasicTransformer(Transformer):
     def sgn(self, meta, items):
         p0 = None
         sgn = lambda x: x < 0 and -1 or (x > 0 and 1) or 0
+        if items[1] is None:
+            return None
         if items[1].type_ == Type.string:
             error(get_lineno(items[0]), "Expected a numeric expression, got TYPE.string instead")
             p0 = None
