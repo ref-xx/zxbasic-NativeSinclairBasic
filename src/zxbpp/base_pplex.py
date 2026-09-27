@@ -135,7 +135,7 @@ def transform_dim_statement(dim_stmt: str) -> str:
             count = dims[0].strip()
             length = dims[1].strip()
             transformed_parts.append(
-                f"DIM {name}({count}): FOR __zxb_dim_k = 0 TO ({count}): LET {name}(__zxb_dim_k) = SPACE$({length}): NEXT __zxb_dim_k"
+                f"DIM {name}({count}): FOR __zxb_dim_k = LBOUND({name}) TO ({count}): LET {name}(__zxb_dim_k) = SPACE$({length}): NEXT __zxb_dim_k"
             )
         else:
             outer_dims = ", ".join(d.strip() for d in dims[:-1])

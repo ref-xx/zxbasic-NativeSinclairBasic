@@ -26,6 +26,7 @@ REM ... unless the user has specified otherwise
 #include once <attr.bas>
 #include once <point.bas>
 #include once <screen.bas>
+#include once <space.bas>
 
 REM This is not the original Sinclair INPUT, but better than nothing
 #include once <input.bas>

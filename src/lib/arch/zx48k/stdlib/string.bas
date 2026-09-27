@@ -19,6 +19,8 @@ REM Avoid recursive / multiple inclusion
 
 #define __MAX_LEN__ 65535
 
+#include once <space.bas>
+
 
 ' ----------------------------------------------------------------
 ' function mid$(A$, <from>, <len>)

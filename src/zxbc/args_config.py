@@ -107,10 +107,13 @@ def parse_options(args: list[str] | None = None) -> Namespace:
             val = "".join(macro[1:])
             OPTIONS.__DEFINES[name] = val
 
-    if OPTIONS.sinclair:
-        OPTIONS.array_base = 1
-        OPTIONS.string_base = 1
-        OPTIONS.case_insensitive = True
+    if OPTIONS.sinclair or OPTIONS.basinc:
+        if options.array_base is None:
+            OPTIONS.array_base = 1
+        if options.string_base is None:
+            OPTIONS.string_base = 1
+        if OPTIONS.sinclair:
+            OPTIONS.case_insensitive = True
 
     OPTIONS.case_insensitive = options.ignore_case
     OPTIONS.use_basic_loader = options.basic
