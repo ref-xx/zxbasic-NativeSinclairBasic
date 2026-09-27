@@ -806,15 +806,16 @@ def main(argv):
         CURRENT_DIR = os.path.dirname(output.CURRENT_FILE[-1])
 
     if getattr(config.OPTIONS, "basinc", False):
-        included_file = search_filename("space.bas", 0, local_first=False)
-        if included_file:
-            OUTPUT += include_once(included_file, 0, local_first=False)
-            if OUTPUT and OUTPUT[-1] != "\n":
-                OUTPUT += "\n"
+        for lib_name in ("space.bas", "attr.bas", "screen.bas", "point.bas"):
+            included_file = search_filename(lib_name, 0, local_first=False)
+            if included_file:
+                OUTPUT += include_once(included_file, 0, local_first=False)
+                if OUTPUT and OUTPUT[-1] != "\n":
+                    OUTPUT += "\n"
 
-            parse_with_lark()
-            output.CURRENT_FILE.pop()
-            CURRENT_DIR = os.path.dirname(output.CURRENT_FILE[-1])
+                parse_with_lark()
+                output.CURRENT_FILE.pop()
+                CURRENT_DIR = os.path.dirname(output.CURRENT_FILE[-1])
 
     prev_file = global_.FILENAME
     global_.FILENAME = output.CURRENT_FILE[-1]

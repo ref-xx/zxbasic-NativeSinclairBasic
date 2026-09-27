@@ -51,7 +51,7 @@ def filter_basinc_metadata(text: str) -> str:
             or (
                 s.startswith("#")
                 and not re.match(
-                    r"^#\s*(include|define|undef|ifdef|ifndef|else|elif|endif|line|init|pragma)\b", s, re.IGNORECASE
+                    r"^#\s*(include|define|undef|ifdef|ifndef|else|elif|endif|line|init|pragma|require|warning|error)\b", s, re.IGNORECASE
                 )
             )
         ):
