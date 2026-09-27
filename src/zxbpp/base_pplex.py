@@ -431,6 +431,191 @@ def transform_dynamic_jumps_and_restores(text: str) -> str:
     return "".join(out_lines)
 
 
+INPUT_VAR_REGEX = r"^[a-zA-Z_][a-zA-Z0-9_]*\$?(?:\s*\([^)]*\))?$"
+
+
+def is_input_lvalue(s: str) -> bool:
+    s = s.strip()
+    return bool(re.match(INPUT_VAR_REGEX, s))
+
+
+def is_input_string_target(s: str) -> bool:
+    s = s.strip()
+    return bool(re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*\$", s))
+
+
+def strip_outer_parens(s: str) -> str:
+    """Strips outer matching parentheses if the entire string is enclosed in them."""
+    s = s.strip()
+    if s.startswith("(") and s.endswith(")"):
+        depth = 0
+        for i, ch in enumerate(s):
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0 and i < len(s) - 1:
+                    return s
+        if depth == 0:
+            return s[1:-1].strip()
+    return s
+
+
+def transform_input_statement(stmt: str) -> str:
+    """Transforms a single Sinclair BASIC INPUT statement into PRINT and __zxb_input_* calls."""
+    pattern = r"^(\s*(?:\d+\s+)?(?:.*?\bTHEN\s+)?)(INPUT\b)\s*(.+)$"
+    m = re.match(pattern, stmt.strip(), re.IGNORECASE)
+    if not m:
+        return stmt
+
+    prefix = m.group(1) or ""
+    remainder = m.group(3).strip()
+
+    # Handle simple case: INPUT a or INPUT a$ or INPUT LINE a$
+    clean_rem = remainder
+    if clean_rem.upper().startswith("LINE "):
+        clean_rem = clean_rem[5:].strip()
+
+    if is_input_lvalue(clean_rem):
+        func = "__zxb_input_str" if is_input_string_target(clean_rem) else "__zxb_input_num"
+        return f"{prefix}LET {clean_rem} = {func}()"
+
+    # Tokenize remainder by ';' and ',', respecting quotes and parentheses
+    tokens = []
+    curr = []
+    i = 0
+    n = len(remainder)
+    paren_depth = 0
+    while i < n:
+        ch = remainder[i]
+        if ch == '"':
+            curr.append(ch)
+            i += 1
+            while i < n:
+                curr.append(remainder[i])
+                if remainder[i] == '"':
+                    if i + 1 < n and remainder[i + 1] == '"':
+                        curr.append('"')
+                        i += 1
+                    else:
+                        break
+                i += 1
+        elif ch == "(":
+            paren_depth += 1
+            curr.append(ch)
+        elif ch == ")":
+            paren_depth = max(0, paren_depth - 1)
+            curr.append(ch)
+        elif (ch == ";" or ch == ",") and paren_depth == 0:
+            tokens.append(("".join(curr).strip(), ch))
+            curr = []
+        else:
+            curr.append(ch)
+        i += 1
+    if curr:
+        tokens.append(("".join(curr).strip(), ""))
+
+    result_actions = []
+    curr_prompt_tokens = []
+
+    for tok_text, sep in tokens:
+        test_var = tok_text
+        if test_var.upper().startswith("LINE "):
+            test_var = test_var[5:].strip()
+
+        if is_input_lvalue(test_var) and not (test_var.startswith('"') or test_var.startswith("(")):
+            func = "__zxb_input_str" if is_input_string_target(test_var) else "__zxb_input_num"
+            if curr_prompt_tokens:
+                prompt_str = "".join(t + s for t, s in curr_prompt_tokens).strip()
+                if prompt_str.endswith(";") or prompt_str.endswith(","):
+                    delim = prompt_str[-1]
+                    inner = prompt_str[:-1].strip()
+                    inner = strip_outer_parens(inner)
+                    prompt_str = inner + delim
+                else:
+                    prompt_str = strip_outer_parens(prompt_str) + ";"
+                result_actions.append(f"PRINT {prompt_str}")
+                curr_prompt_tokens = []
+            result_actions.append(f"LET {test_var} = {func}()")
+        else:
+            curr_prompt_tokens.append((tok_text, sep or ";"))
+
+    if not result_actions:
+        return stmt
+
+    return prefix + ": ".join(result_actions)
+
+
+def split_line_statements(line: str) -> tuple[list[str], str]:
+    """Splits a line into statements separated by ':' outside quotes, and extracts any trailing REM comment."""
+    stmts = []
+    cur = []
+    i = 0
+    n = len(line)
+    rem = ""
+
+    while i < n:
+        ch = line[i]
+        if ch == '"':
+            cur.append(ch)
+            i += 1
+            while i < n:
+                cur.append(line[i])
+                if line[i] == '"':
+                    if i + 1 < n and line[i + 1] == '"':
+                        cur.append('"')
+                        i += 1
+                    else:
+                        break
+                i += 1
+        elif (
+            line[i:i + 4].upper() == "REM "
+            or line[i:i + 4].upper() == "REM\t"
+            or line[i:].upper() == "REM"
+        ):
+            rem = line[i:]
+            break
+        elif ch == ":":
+            stmts.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+        i += 1
+
+    if cur:
+        stmts.append("".join(cur))
+
+    return stmts, rem
+
+
+def transform_sinclair_input(text: str) -> str:
+    """Transforms Sinclair BASIC 'INPUT' statements into PRINT and __zxb_input_* calls.
+    Preserves line numbers, string literals, and REM comments.
+    """
+    lines = text.splitlines(keepends=True)
+    out_lines = []
+
+    for line in lines:
+        line_ending = "\n" if line.endswith("\n") else ""
+        raw_line = line.rstrip("\r\n")
+
+        if not re.search(r"\bINPUT\b", raw_line, re.IGNORECASE):
+            out_lines.append(line)
+            continue
+
+        stmts, rem = split_line_statements(raw_line)
+        new_stmts = []
+        for stmt in stmts:
+            new_stmts.append(transform_input_statement(stmt))
+
+        transformed_line = ":".join(new_stmts)
+        if rem:
+            transformed_line = transformed_line + (":" if transformed_line and not transformed_line.endswith(":") else "") + rem
+        out_lines.append(transformed_line + line_ending)
+
+    return "".join(out_lines)
+
+
 # Names for std input/output
 STDERR = "(stderr)"
 STDIN = "(stdin)"
@@ -538,6 +723,7 @@ class BaseLexer:
                     or getattr(OPTIONS, "basinc", False)
                 ):
                     self.input_data = transform_dynamic_jumps_and_restores(self.input_data)
+                self.input_data = transform_sinclair_input(self.input_data)
             if len(self.input_data) and self.input_data[-1] != EOL:
                 self.input_data += EOL
         except IOError:

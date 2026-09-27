@@ -30,6 +30,7 @@ REM ... unless the user has specified otherwise
 
 REM This is not the original Sinclair INPUT, but better than nothing
 #include once <input.bas>
+#include once <sinclair_input.bas>
 
 REM This needed to initialize USR "a" to a memory heap space
 #include once <alloc.bas>
