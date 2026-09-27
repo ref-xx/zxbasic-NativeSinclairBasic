@@ -1,6 +1,8 @@
 # Boriel ZX Basic - Direct
 
-Boriel ZX Basic - Direct is a specialized fork of Boriel's ZX BASIC Compiler designed for direct, out-of-the-box compilation of unmodified Sinclair BASIC programs, with seamless integration for BasInc IDE (https://github.com/ref-xx/basinc).
+Boriel ZX Basic - Direct is a specialized fork of Boriel's ZX BASIC Compiler designed for direct, out-of-the-box compilation of unmodified Sinclair BASIC programs, with seamless integration for BasinC IDE (https://github.com/ref-xx/basinc).
+
+Boriel's Basic is a Sinclair BASIC-like language, but it is not compatible with Sinclair BASIC. Apart from very simple programs, it cannot compile standard Sinclair BASIC source code without major adjustments. Work on this compiler is ongoing; for programs it can compile successfully, it can provide speed improvements of up to approximately ten times.
 
 ---
 
