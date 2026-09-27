@@ -136,6 +136,26 @@ def parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Make all untyped variables default to Float (Sinclair BASIC compatibility)",
     )
+    parser_.add_argument(
+        "--enablejumptables",
+        "--enable-jumptables",
+        type=str,
+        dest="enablejumptables",
+        nargs="?",
+        const="all",
+        default=None,
+        help="Enable jump tables for dynamic/variable GO TO and GO SUB, with optional line ranges (e.g. '7000-7300, 9000-9999')",
+    )
+    parser_.add_argument(
+        "--enabledynamicrestore",
+        "--enable-dynamic-restore",
+        type=str,
+        dest="enabledynamicrestore",
+        nargs="?",
+        const="all",
+        default=None,
+        help="Enable dynamic restore table for variable RESTORE, with optional line ranges (e.g. '8000-9000')",
+    )
     for vtype in ("ubyte", "byte", "uinteger", "integer", "ulong", "long", "float", "fixed"):
         parser_.add_argument(
             f"--var{vtype}",

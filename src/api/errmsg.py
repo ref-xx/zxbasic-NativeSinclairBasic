@@ -5,6 +5,8 @@
 # See https://www.gnu.org/licenses/agpl-3.0.html for details.
 # --------------------------------------------------------------------
 
+import os
+import re
 import sys
 from collections.abc import Callable
 from functools import wraps
@@ -15,6 +17,7 @@ from src.api.constants import CLASS
 # Exports only these functions. Others
 __all__ = (
     "error",
+    "get_basic_line_number",
     "is_valid_warning_code",
     "register_warning",
     "warning",
@@ -25,6 +28,29 @@ __all__ = (
 
 WARNING_PREFIX: str = ""  # will be prepended to warning messages
 ERROR_PREFIX: str = ""  # will be prepended to error messages
+
+
+def get_basic_line_number(fname: str | None, lineno: int) -> int | None:
+    """Finds the Sinclair BASIC line number for the given file and line number if present."""
+    if not fname or fname == "(stdin)" or not os.path.isfile(fname):
+        return None
+    try:
+        import linecache
+
+        line = linecache.getline(fname, lineno)
+        if line:
+            m = re.match(r"^\s*(\d+)\b", line)
+            if m:
+                return int(m.group(1))
+        # If line does not start with digits (e.g. multi-line or empty line), scan backwards
+        for lno in range(lineno - 1, max(0, lineno - 30), -1):
+            line = linecache.getline(fname, lno)
+            m = re.match(r"^\s*(\d+)\b", line)
+            if m:
+                return int(m.group(1))
+    except Exception:
+        pass
+    return None
 
 
 def msg_output(msg: str) -> None:
@@ -52,7 +78,9 @@ def error(lineno: int, msg: str, fname: str | None = None) -> None:
     if global_.has_errors > config.OPTIONS.max_syntax_errors:
         msg = "Too many errors. Giving up!"
 
-    msg = "%s:%i: error:%s %s" % (fname, lineno, ERROR_PREFIX, msg)
+    basic_line = get_basic_line_number(fname, lineno)
+    line_info = f"[line {basic_line}] " if basic_line is not None else ""
+    msg = "%s:%i: error:%s %s%s" % (fname, lineno, ERROR_PREFIX, line_info, msg)
     msg_output(msg)
 
     if global_.has_errors > config.OPTIONS.max_syntax_errors:
@@ -72,7 +100,9 @@ def warning(lineno: int, msg: str, fname: str | None = None) -> None:
     if fname is None:
         fname = global_.FILENAME
 
-    msg = "%s:%i: %s %s" % (fname, lineno, WARNING_PREFIX or "warning:", msg)
+    basic_line = get_basic_line_number(fname, lineno)
+    line_info = f"[line {basic_line}] " if basic_line is not None else ""
+    msg = "%s:%i: %s %s%s" % (fname, lineno, WARNING_PREFIX or "warning:", line_info, msg)
     msg_output(msg)
 
 

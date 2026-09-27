@@ -15,8 +15,10 @@ from src.api.debug import __DEBUG__
 from src.api.errmsg import syntax_error_cant_convert_to_type, syntax_error_not_constant
 from src.api.exception import InvalidCONSTexpr, InvalidOperatorError
 from src.arch.z80 import backend
+from src.arch.z80.backend import common
 from src.arch.z80.backend.runtime import LABEL_REQUIRED_MODULES, RUNTIME_LABELS
 from src.arch.z80.backend.runtime import Labels as RuntimeLabel
+from src.zxbc.args_config import is_line_in_ranges
 from src.ast_.tree import ChildrenList
 from src.symbols import sym as symbols
 from src.symbols.symbol_ import Symbol
@@ -169,6 +171,38 @@ class TranslatorVisitor(TranslatorInstVisitor):
     def emit_jump_tables(self):
         for table_ in self.JUMP_TABLES:
             self.ic_vard(table_.label, [f"#{len(table_.addresses)!s}"] + [f"##{x.mangled}" for x in table_.addresses])
+
+        if OPTIONS.jump_table_enabled:
+            self.emit_dyn_jump_table()
+
+        if OPTIONS.dynamic_restore_enabled:
+            self.emit_dyn_restore_table()
+
+    def emit_dyn_jump_table(self):
+        entries = []
+        for lineno in sorted(gl.PROGRAM_LINES.keys()):
+            if is_line_in_ranges(lineno, OPTIONS.jump_table_ranges):
+                entries.append("%04X" % (lineno & 0xFFFF))
+                entries.append(f"##{gl.PROGRAM_LINES[lineno]}")
+        # Sentinel: line 0xFFFF, address .core.__END_PROGRAM
+        entries.append("FFFF")
+        entries.append(f"##{common.END_LABEL}")
+        self.ic_vard(".core.__ZXB_DYN_JUMP_TABLE", entries)
+
+    def emit_dyn_restore_table(self):
+        entries = []
+        for lineno in sorted(gl.DATA_LINES.keys()):
+            if is_line_in_ranges(lineno, OPTIONS.dynamic_restore_ranges):
+                data_mangled = gl.DATA_LINES[lineno]
+                gl.DATA_LABELS_REQUIRED.add(data_mangled.split(".")[-1])
+                entries.append("%04X" % (lineno & 0xFFFF))
+                entries.append(f"##{data_mangled}")
+        # Sentinel: line 0xFFFF, address __DATA__END
+        entries.append("FFFF")
+        entries.append("##__DATA__END")
+        if not gl.DATAS:
+            self.ic_vard("__DATA__END", ["00"])
+        self.ic_vard(".core.__ZXB_DYN_RESTORE_TABLE", entries)
 
     def _visit(self, node):
         if isinstance(node, Symbol):

@@ -12,6 +12,7 @@ import src.api.errmsg
 import src.api.global_ as gl
 import src.api.tmp_labels
 from src.api import check
+from src.api.config import OPTIONS
 from src.api.constants import CLASS, CONVENTION, SCOPE, TYPE
 from src.api.debug import __DEBUG__
 from src.api.errmsg import error
@@ -648,10 +649,36 @@ class Translator(TranslatorVisitor):
         self.LOOPS.pop()
 
     def visit_GOTO(self, node):
-        self.ic_jump(node.children[0].mangled)
+        if not getattr(node.children[0], "declared", True) and OPTIONS.jump_table_enabled and str(node.children[0].name).isdigit():
+            target_line = int(node.children[0].name)
+            self.ic_fparam(TYPE.uinteger, target_line)
+            self.runtime_call(RuntimeLabel.DYN_GOTO, 0)
+        else:
+            self.ic_jump(node.children[0].mangled)
 
     def visit_GOSUB(self, node):
-        self.ic_call(node.children[0].mangled, 0)
+        if not getattr(node.children[0], "declared", True) and OPTIONS.jump_table_enabled and str(node.children[0].name).isdigit():
+            target_line = int(node.children[0].name)
+            self.ic_fparam(TYPE.uinteger, target_line)
+            self.runtime_call(RuntimeLabel.DYN_GOSUB, 0)
+        else:
+            self.ic_call(node.children[0].mangled, 0)
+
+    def visit_DYN_GOTO(self, node):
+        yield self.visit(node.children[0])
+        self.ic_fparam(node.children[0].type_, node.children[0].t)
+        self.runtime_call(RuntimeLabel.DYN_GOTO, 0)
+
+    def visit_DYN_GOSUB(self, node):
+        yield self.visit(node.children[0])
+        self.ic_fparam(node.children[0].type_, node.children[0].t)
+        self.runtime_call(RuntimeLabel.DYN_GOSUB, 0)
+
+    def visit_DYN_RESTORE(self, node):
+        gl.DATA_IS_USED = True
+        yield self.visit(node.children[0])
+        self.ic_fparam(node.children[0].type_, node.children[0].t)
+        self.runtime_call(RuntimeLabel.DYN_RESTORE, 0)
 
     def visit_ON_GOTO(self, node):
         table_label = src.api.tmp_labels.tmp_label()

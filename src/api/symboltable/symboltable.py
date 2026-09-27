@@ -807,6 +807,8 @@ class SymbolTable:
     def check_labels(self):
         """Checks if all the labels has been declared"""
         for entry in self.labels:
+            if OPTIONS.jump_table_enabled and str(entry.name).isdigit():
+                continue
             self.check_is_declared(entry.name, entry.lineno, CLASS.label.value)
 
     def check_classes(self, scope=-1):

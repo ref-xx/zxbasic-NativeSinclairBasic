@@ -224,8 +224,13 @@ def check_pending_labels(ast):
 
         tmp = global_.SYMBOL_TABLE.get_entry(node.name)
         if tmp is None or tmp.class_ == CLASS.unknown:
+            if config.OPTIONS.jump_table_enabled and str(node.name).isdigit():
+                continue
             errmsg.error(node.lineno, f'Undeclared identifier "{node.name}"')
         else:
+            if not getattr(tmp, "declared", True):
+                if config.OPTIONS.jump_table_enabled and str(node.name).isdigit():
+                    continue
             assert tmp.class_ == CLASS.label
 
         result = result and tmp is not None

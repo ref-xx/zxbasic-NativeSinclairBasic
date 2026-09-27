@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import os
+import re
+import sys
 from typing import TYPE_CHECKING
 
 import src.api.config
@@ -23,11 +25,73 @@ from src.zxbc.args_parser import FileType
 if TYPE_CHECKING:
     from argparse import Namespace
 
-__all__ = "parse_options", "set_option_defines"
+__all__ = "parse_options", "set_option_defines", "parse_line_ranges", "is_line_in_ranges"
+
+
+def normalize_dynamic_table_args(args: list[str]) -> list[str]:
+    flags = {"--enablejumptables", "--enable-jumptables", "--enabledynamicrestore", "--enable-dynamic-restore"}
+    new_args = []
+    i = 0
+    n = len(args)
+    while i < n:
+        arg = args[i]
+        matched_flag = None
+        for f in flags:
+            if arg == f:
+                matched_flag = f
+                break
+        if matched_flag:
+            i += 1
+            collected = []
+            while i < n and not args[i].startswith("-") and (re.match(r"^[\d\s,\-]+$", args[i]) or args[i].lower() == "all"):
+                collected.append(args[i])
+                i += 1
+            val = ",".join(collected) if collected else "all"
+            new_args.append(f"{matched_flag}={val}")
+        else:
+            new_args.append(arg)
+            i += 1
+    return new_args
+
+
+def parse_line_ranges(range_str: str | None) -> list[tuple[int, int]] | None:
+    if not range_str or range_str.strip().lower() == "all":
+        return None
+    ranges = []
+    parts = re.split(r"[,;\s]+", range_str.strip())
+    for part in parts:
+        if not part:
+            continue
+        if "-" in part:
+            try:
+                s_str, e_str = part.split("-", 1)
+                start = int(s_str.strip())
+                end = int(e_str.strip())
+                ranges.append((min(start, end), max(start, end)))
+            except ValueError:
+                pass
+        else:
+            try:
+                val = int(part.strip())
+                ranges.append((val, val))
+            except ValueError:
+                pass
+    return ranges or None
+
+
+def is_line_in_ranges(lineno: int, ranges: list[tuple[int, int]] | None) -> bool:
+    if ranges is None:
+        return True
+    return any(start <= lineno <= end for start, end in ranges)
 
 
 def parse_options(args: list[str] | None = None) -> Namespace:
     """Parses command line options and setup global Options container"""
+    if args is not None:
+        args = normalize_dynamic_table_args(args)
+    else:
+        args = normalize_dynamic_table_args(sys.argv[1:])
+
     parser = args_parser.parser()
     options = parser.parse_args(args=args)
 
@@ -47,6 +111,20 @@ def parse_options(args: list[str] | None = None) -> Namespace:
     OPTIONS.sinclair = options.sinclair
     OPTIONS.basinc = getattr(options, "basinc", False)
     OPTIONS.default_float = getattr(options, "default_float", False)
+
+    if getattr(options, "enablejumptables", None) is not None:
+        OPTIONS.jump_table_enabled = True
+        OPTIONS.jump_table_ranges = parse_line_ranges(options.enablejumptables)
+    else:
+        OPTIONS.jump_table_enabled = False
+        OPTIONS.jump_table_ranges = None
+
+    if getattr(options, "enabledynamicrestore", None) is not None:
+        OPTIONS.dynamic_restore_enabled = True
+        OPTIONS.dynamic_restore_ranges = parse_line_ranges(options.enabledynamicrestore)
+    else:
+        OPTIONS.dynamic_restore_enabled = False
+        OPTIONS.dynamic_restore_ranges = None
     var_types = {}
     for vtype in ("ubyte", "byte", "uinteger", "integer", "ulong", "long", "float", "fixed"):
         val_list = getattr(options, f"var{vtype}", None) or []

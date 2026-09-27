@@ -41,6 +41,9 @@ class CoreLabels:
     DIVU8_FAST = f"{NAMESPACE}.__DIVU8_FAST"
     DIVU16 = f"{NAMESPACE}.__DIVU16"
     DIVU32 = f"{NAMESPACE}.__DIVU32"
+    DYN_GOTO = f"{NAMESPACE}.__DYN_GOTO"
+    DYN_GOSUB = f"{NAMESPACE}.__DYN_GOSUB"
+    DYN_RESTORE = f"{NAMESPACE}.__DYN_RESTORE"
     EQ16 = f"{NAMESPACE}.__EQ16"
     EQ32 = f"{NAMESPACE}.__EQ32"
     EQF = f"{NAMESPACE}.__EQF"
@@ -170,6 +173,9 @@ REQUIRED_MODULES = {
     CoreLabels.DIVU32: "arith/div32.asm",
     CoreLabels.DIVI8_FAST: "arith/div8.asm",
     CoreLabels.DIVU8_FAST: "arith/div8.asm",
+    CoreLabels.DYN_GOTO: "dynjump.asm",
+    CoreLabels.DYN_GOSUB: "dynjump.asm",
+    CoreLabels.DYN_RESTORE: "dynrestore.asm",
     CoreLabels.GEF: "cmp/gef.asm",
     CoreLabels.GTF: "cmp/gtf.asm",
     CoreLabels.I8TOFREG: "u32tofreg.asm",

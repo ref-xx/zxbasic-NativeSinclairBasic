@@ -207,3 +207,11 @@ ENABLED_WARNINGS: dict[str, bool] = {}
 
 # Number of expected warnings (won't be issued)
 EXPECTED_WARNINGS: int = 0
+
+# ----------------------------------------------------------------------
+# Dynamic Jump Tables and Dynamic Restore
+# ----------------------------------------------------------------------
+PROGRAM_LINES: dict[int, str] = {}  # Maps basic line number -> mangled asm label
+DATA_LINES: dict[int, str] = {}  # Maps basic line number -> first DATA block mangled asm label
+CURRENT_BASIC_LINE: int | None = None
+

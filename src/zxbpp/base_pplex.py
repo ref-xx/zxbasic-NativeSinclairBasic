@@ -327,6 +327,110 @@ def transform_sinclair_deffn(text: str) -> str:
 
     return "".join(out_lines)
 
+
+def transform_dynamic_statement(stmt: str) -> str:
+    """Transforms a single GOTO, GOSUB, or RESTORE statement if the target is an expression."""
+    pattern = r"^(\s*(?:\d+\s+)?(?:.*?\bTHEN\s+)?)(GO\s*TO|GOTO|GO\s*SUB|GOSUB|RESTORE)\s+(.+)$"
+    m = re.match(pattern, stmt.strip(), re.IGNORECASE)
+    if not m:
+        return stmt
+
+    prefix = m.group(1) or ""
+    verb = m.group(2)
+    target = m.group(3).strip()
+
+    # Check if target is a simple single ID or integer literal
+    if re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*\$?$", target) or re.match(r"^\d+$", target):
+        return stmt
+
+    return f"{prefix}LET __zxb_dyn_target = ({target}): {verb} __zxb_dyn_target"
+
+
+def transform_dynamic_jumps_and_restores(text: str) -> str:
+    """Transforms Sinclair BASIC 'GOTO <expr>', 'GOSUB <expr>', and 'RESTORE <expr>' statements
+    where <expr> is a complex expression into:
+    LET __zxb_dyn_target = (<expr>): <verb> __zxb_dyn_target
+    Preserves line numbers, string literals, and REM comments.
+    """
+    lines = text.splitlines(keepends=True)
+    out_lines = []
+
+    for line in lines:
+        line_ending = "\n" if line.endswith("\n") else ""
+        raw_line = line.rstrip("\r\n")
+
+        # Split line into segments: string literals, REM comments, and code
+        segments = []
+        i = 0
+        n = len(raw_line)
+        in_str = False
+        cur = []
+
+        while i < n:
+            ch = raw_line[i]
+            if not in_str:
+                if ch == '"':
+                    if cur:
+                        segments.append(("code", "".join(cur)))
+                        cur = []
+                    in_str = True
+                    cur.append(ch)
+                    i += 1
+                    continue
+                elif (
+                    raw_line[i:i + 4].upper() == "REM "
+                    or raw_line[i:i + 4].upper() == "REM\t"
+                    or raw_line[i:].upper() == "REM"
+                ):
+                    if cur:
+                        segments.append(("code", "".join(cur)))
+                        cur = []
+                    segments.append(("rem", raw_line[i:]))
+                    cur = []
+                    i = n
+                    break
+                else:
+                    cur.append(ch)
+                    i += 1
+            else:
+                cur.append(ch)
+                if ch == '"':
+                    if i + 1 < n and raw_line[i + 1] == '"':
+                        cur.append('"')
+                        i += 2
+                        continue
+                    else:
+                        in_str = False
+                        segments.append(("str", "".join(cur)))
+                        cur = []
+                i += 1
+
+        if cur:
+            segments.append(("str" if in_str else "code", "".join(cur)))
+
+        # Process code segments
+        new_segments = []
+        for seg_type, seg_val in segments:
+            if seg_type != "code":
+                new_segments.append(seg_val)
+                continue
+
+            upper = seg_val.upper()
+            if not any(k in upper for k in ("GOTO", "GO TO", "GOSUB", "GO SUB", "RESTORE")):
+                new_segments.append(seg_val)
+                continue
+
+            parts = seg_val.split(":")
+            new_parts = []
+            for part in parts:
+                new_parts.append(transform_dynamic_statement(part))
+            new_segments.append(": ".join(new_parts))
+
+        out_lines.append("".join(new_segments) + line_ending)
+
+    return "".join(out_lines)
+
+
 # Names for std input/output
 STDERR = "(stderr)"
 STDIN = "(stdin)"
@@ -428,6 +532,12 @@ class BaseLexer:
                     self.input_data = filter_basinc_metadata(self.input_data)
                     self.input_data = transform_sinclair_dim(self.input_data)
                 self.input_data = transform_sinclair_deffn(self.input_data)
+                if (
+                    getattr(OPTIONS, "jump_table_enabled", False)
+                    or getattr(OPTIONS, "dynamic_restore_enabled", False)
+                    or getattr(OPTIONS, "basinc", False)
+                ):
+                    self.input_data = transform_dynamic_jumps_and_restores(self.input_data)
             if len(self.input_data) and self.input_data[-1] != EOL:
                 self.input_data += EOL
         except IOError:

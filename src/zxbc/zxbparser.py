@@ -156,6 +156,9 @@ def init():
     gl.DATA_PTR_CURRENT = src.api.utils.current_data_label()
     gl.DATA_FUNCTIONS = []
     gl.error_msg_cache.clear()
+    gl.PROGRAM_LINES.clear()
+    gl.DATA_LINES.clear()
+    gl.CURRENT_BASIC_LINE = None
 
 
 def init_custom_var_types():
@@ -519,6 +522,10 @@ def make_label(id_: str, lineno: int):
     entry = SYMBOL_TABLE.declare_label(id_, lineno)
     if entry:
         gl.DATA_LABELS[id_] = gl.DATA_PTR_CURRENT  # This label points to the current DATA block index
+        if id_.isdigit():
+            line_val = int(id_)
+            gl.PROGRAM_LINES[line_val] = entry.mangled
+            gl.CURRENT_BASIC_LINE = line_val
     return entry
 
 
@@ -1346,7 +1353,27 @@ class ZXBasicTransformer(Transformer):
 
     def goto(self, meta, items):
         p0 = None
-        entry = check_and_make_label(items[1], get_lineno(items[1]))
+        target = items[1]
+        is_gosub = "GOSUB" in items[0].upper()
+        cmd = "DYN_GOSUB" if is_gosub else "DYN_GOTO"
+
+        # Check if target is a variable or expression
+        if isinstance(target, str):
+            var_entry = SYMBOL_TABLE.get_entry(target)
+            if var_entry is not None and var_entry.class_ == CLASS.var:
+                if not OPTIONS.jump_table_enabled:
+                    error(get_lineno(target), f"'{target}' is a VAR, not a LABEL. Use --enablejumptables to enable dynamic jumps.")
+                    return None
+                target_expr = SYMBOL_TABLE.access_var(target, get_lineno(target))
+                mark_entry_as_accessed(target_expr)
+                return make_sentence(get_lineno(items[0]), cmd, make_typecast(Type.uinteger, target_expr, get_lineno(target)))
+        elif isinstance(target, sym.SYMBOL):
+            if not OPTIONS.jump_table_enabled:
+                error(get_lineno(items[0]), "Dynamic GOTO/GOSUB requires --enablejumptables")
+                return None
+            return make_sentence(get_lineno(items[0]), cmd, make_typecast(Type.uinteger, target, get_lineno(items[0])))
+
+        entry = check_and_make_label(target, get_lineno(target))
         if entry is not None:
             p0 = make_sentence(get_lineno(items[0]), items[0].upper(), entry)
 
@@ -1647,6 +1674,8 @@ class ZXBasicTransformer(Transformer):
     def data(self, meta, items):
         p0 = None
         label_ = make_label(gl.DATA_PTR_CURRENT, lineno=get_lineno(items[0]))
+        if gl.CURRENT_BASIC_LINE is not None and gl.CURRENT_BASIC_LINE not in gl.DATA_LINES:
+            gl.DATA_LINES[gl.CURRENT_BASIC_LINE] = label_.mangled
         datas_ = []
         funcs = []
         if items[1] is None:
@@ -1689,7 +1718,23 @@ class ZXBasicTransformer(Transformer):
         if len(items) + 1 == 2:
             lbl = None
         else:
-            lbl = check_and_make_label(items[1], get_lineno(items[0]))
+            target = items[1]
+            if isinstance(target, str):
+                var_entry = SYMBOL_TABLE.get_entry(target)
+                if var_entry is not None and var_entry.class_ == CLASS.var:
+                    if not OPTIONS.dynamic_restore_enabled:
+                        error(get_lineno(target), f"'{target}' is a VAR, not a LABEL. Use --enabledynamicrestore to enable dynamic restore.")
+                        return None
+                    target_expr = SYMBOL_TABLE.access_var(target, get_lineno(target))
+                    mark_entry_as_accessed(target_expr)
+                    return make_sentence(get_lineno(items[0]), "DYN_RESTORE", make_typecast(Type.uinteger, target_expr, get_lineno(target)))
+            elif isinstance(target, sym.SYMBOL):
+                if not OPTIONS.dynamic_restore_enabled:
+                    error(get_lineno(items[0]), "Dynamic RESTORE requires --enabledynamicrestore")
+                    return None
+                return make_sentence(get_lineno(items[0]), "DYN_RESTORE", make_typecast(Type.uinteger, target, get_lineno(items[0])))
+
+            lbl = check_and_make_label(target, get_lineno(items[0]))
         p0 = make_sentence(get_lineno(items[0]), "RESTORE", lbl)
         return p0
 

@@ -115,7 +115,7 @@ def load_config_from_file(
     try:
         cfg = configparser.ConfigParser()
         cfg.read(filename, encoding="utf-8")
-    except configparser.DuplicateSectionError, configparser.DuplicateOptionError:
+    except (configparser.DuplicateSectionError, configparser.DuplicateOptionError):
         errmsg.msg_output(f"Invalid config file '{filename}': it has duplicated fields")
         if stop_on_error:
             sys.exit(1)
@@ -157,7 +157,7 @@ def save_config_into_file(
     if os.path.exists(filename):
         try:
             cfg.read(filename, encoding="utf-8")
-        except configparser.DuplicateSectionError, configparser.DuplicateOptionError:
+        except (configparser.DuplicateSectionError, configparser.DuplicateOptionError):
             errmsg.msg_output(f"Invalid config file '{filename}': it has duplicated fields")
             if stop_on_error:
                 sys.exit(1)
@@ -229,6 +229,10 @@ def init() -> None:
     OPTIONS(Action.ADD, name="basinc", type=bool, default=False)
     OPTIONS(Action.ADD, name="default_float", type=bool, default=False)
     OPTIONS(Action.ADD, name="var_types", type=dict, default={})
+    OPTIONS(Action.ADD, name="jump_table_enabled", type=bool, default=False)
+    OPTIONS(Action.ADD, name="jump_table_ranges", type=ANYTYPE, default=None)
+    OPTIONS(Action.ADD, name="dynamic_restore_enabled", type=bool, default=False)
+    OPTIONS(Action.ADD, name="dynamic_restore_ranges", type=ANYTYPE, default=None)
     OPTIONS(Action.ADD, name=OPTION.STRICT, type=bool, default=False, ignore_none=True)  # True to force type checking
     OPTIONS(Action.ADD, name=OPTION.ASM_ZXNEXT, type=bool, default=False, ignore_none=True)  # Enable ZX Next ASM
     OPTIONS(Action.ADD, name=OPTION.ARCH, type=str, default=None, ignore_none=True)  # Architecture
