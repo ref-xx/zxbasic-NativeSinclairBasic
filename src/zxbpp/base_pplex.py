@@ -12,7 +12,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import StrEnum, unique
 
-from src.api import lex, utils
+from src.api import errmsg, lex, utils
 from src.api.config import OPTIONS
 from src.zxbpp.prepro import output
 from src.zxbpp.prepro.builtinmacro import BuiltinMacro
@@ -87,20 +87,63 @@ def split_dim_items(dims_str: str) -> list[str]:
     return items
 
 
-def parse_dim_item(item: str) -> tuple[str | None, list[str] | None]:
-    """Parses an item like 'a$(10)' or 'a$(10, 20)' or 'n(5)'."""
-    m = re.match(r'^([a-zA-Z_][a-zA-Z0-9_]*\$?)\s*\((.*)\)$', item.strip())
+def split_line_statements(line: str) -> tuple[list[str], str]:
+    """Splits a line into statements separated by ':' outside quotes, and extracts any trailing REM comment."""
+    stmts = []
+    cur = []
+    i = 0
+    n = len(line)
+    rem = ""
+
+    while i < n:
+        ch = line[i]
+        if ch == '"':
+            cur.append(ch)
+            i += 1
+            while i < n:
+                cur.append(line[i])
+                if line[i] == '"':
+                    if i + 1 < n and line[i + 1] == '"':
+                        cur.append('"')
+                        i += 1
+                    else:
+                        break
+                i += 1
+        elif (
+            line[i:i + 4].upper() == "REM "
+            or line[i:i + 4].upper() == "REM\t"
+            or line[i:].upper() == "REM"
+        ):
+            rem = line[i:]
+            break
+        elif ch == ":":
+            stmts.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+        i += 1
+
+    if cur:
+        stmts.append("".join(cur))
+
+    return stmts, rem
+
+
+def parse_dim_item(item: str) -> tuple[str | None, list[str] | None, str | None]:
+    """Parses an item like 'a$(10)', 'a$(10, 20)', 'n(5)' or 'n(5) AS BYTE'."""
+    m = re.match(r"^([a-zA-Z_][a-zA-Z0-9_]*\$?)\s*\((.*)\)(?:\s+AS\s+([a-zA-Z0-9_]+))?$", item.strip(), re.IGNORECASE)
     if not m:
-        return None, None
+        return None, None, None
     name = m.group(1)
     inner = m.group(2).strip()
+    type_spec = m.group(3)
     dims = split_dim_items(inner)
-    return name, dims
+    return name, dims, type_spec
 
 
 def transform_dim_statement(dim_stmt: str) -> str:
     """Transforms a single DIM statement (e.g. '10 DIM a$(10)' or 'DIM a$(10, 20)')."""
-    m = re.match(r'^(\s*(?:\d+\s+)?)DIM\s+(.*)$', dim_stmt.strip(), re.IGNORECASE)
+    m = re.match(r"^(\s*(?:\d+\s+)?)DIM\s+(.*)$", dim_stmt.strip(), re.IGNORECASE)
     if not m:
         return dim_stmt
 
@@ -121,7 +164,7 @@ def transform_dim_statement(dim_stmt: str) -> str:
     numeric_dims = []
 
     for raw_item in raw_items:
-        name, dims = parse_dim_item(raw_item)
+        name, dims, _ = parse_dim_item(raw_item)
         if not name or not dims or not name.endswith("$"):
             numeric_dims.append(raw_item)
             continue
@@ -135,7 +178,7 @@ def transform_dim_statement(dim_stmt: str) -> str:
             count = dims[0].strip()
             length = dims[1].strip()
             transformed_parts.append(
-                f"DIM {name}({count}): FOR __zxb_dim_k = LBOUND({name}) TO ({count}): LET {name}(__zxb_dim_k) = SPACE$({length}): NEXT __zxb_dim_k"
+                f"DIM {name}({count}): FOR __zxb_dim_k = 1 TO ({count}): LET {name}(__zxb_dim_k) = SPACE$({length}): NEXT __zxb_dim_k"
             )
         else:
             outer_dims = ", ".join(d.strip() for d in dims[:-1])
@@ -226,6 +269,137 @@ def transform_sinclair_dim(text: str) -> str:
         out_lines.append("".join(new_segments) + line_ending)
 
     return "".join(out_lines)
+
+
+def transform_hoist_sinclair_dims(text: str, filename: str = "") -> str:
+    """Scans for array DIM statements in Sinclair BASIC code,
+    hoists their declarations to the top of the file,
+    and strips/comments them at their original locations to prevent
+    'variable already declared' errors and single-pass forward reference errors.
+    If an array is DIMmed more than once (redimmed), emits an error.
+    Preserves line numbers using #line directives.
+    """
+    lines = text.splitlines(keepends=True)
+    hoisted_declarations = []
+    # declared_arrays: name_lower -> (lineno, basic_line_no)
+    declared_arrays: dict[str, tuple[int, int | None]] = {}
+    new_lines = []
+
+    for lineno, line in enumerate(lines, 1):
+        line_ending = "\n" if line.endswith("\n") else ""
+        raw_line = line.rstrip("\r\n")
+
+        # Fast check: must contain DIM outside strings
+        if not re.search(r"\bDIM\b", raw_line, re.IGNORECASE):
+            new_lines.append(line)
+            continue
+
+        stmts, rem = split_line_statements(raw_line)
+        if not stmts:
+            new_lines.append(line)
+            continue
+
+        # Extract line number prefix from first statement if any
+        m_line_no = re.match(r"^(\s*\d+\s+)(.*)$", stmts[0])
+        line_prefix = m_line_no.group(1) if m_line_no else ""
+        basic_line_no = int(line_prefix.strip()) if line_prefix.strip().isdigit() else None
+        if m_line_no:
+            stmts[0] = m_line_no.group(2)
+
+        kept_stmts = []
+        had_dim = False
+
+        for stmt in stmts:
+            stmt_stripped = stmt.strip()
+            m_dim = re.match(r"^DIM\s+(.*)$", stmt_stripped, re.IGNORECASE)
+            if not m_dim:
+                # Check for IF ... THEN DIM ...
+                m_then_dim = re.match(r"^(IF\s+.*?\bTHEN\s+)DIM\s+(.*)$", stmt_stripped, re.IGNORECASE)
+                if not m_then_dim:
+                    kept_stmts.append(stmt_stripped)
+                    continue
+                then_prefix = m_then_dim.group(1)
+                dim_body = m_then_dim.group(2).strip()
+                raw_items = split_dim_items(dim_body)
+                for raw_item in raw_items:
+                    name, dims, type_spec = parse_dim_item(raw_item)
+                    if not name or not dims:
+                        continue
+                    had_dim = True
+                    name_key = name.lower()
+                    if name_key in declared_arrays:
+                        prev_lineno, prev_basic_lineno = declared_arrays[name_key]
+                        prev_loc = f"[line {prev_basic_lineno}]" if prev_basic_lineno is not None else f"line {prev_lineno}"
+                        errmsg.error(
+                            lineno,
+                            f"Array '{name}' already dimensioned at {prev_loc}. Re-dimensioning is not supported.",
+                            fname=filename,
+                        )
+                    else:
+                        declared_arrays[name_key] = (lineno, basic_line_no)
+                        dims_str = ", ".join(d.strip() for d in dims)
+                        spec_str = f" AS {type_spec}" if type_spec else ""
+                        hoisted_declarations.append(f"DIM {name}({dims_str}){spec_str}")
+                kept_stmts.append(f"{then_prefix}REM [hoisted] DIM {dim_body}")
+                continue
+
+            # Standard DIM statement. Parse items.
+            dim_body = m_dim.group(1).strip()
+            raw_items = split_dim_items(dim_body)
+            has_array_item = False
+
+            for raw_item in raw_items:
+                name, dims, type_spec = parse_dim_item(raw_item)
+                if not name or not dims:
+                    continue
+
+                has_array_item = True
+                had_dim = True
+                name_key = name.lower()
+
+                if name_key in declared_arrays:
+                    prev_lineno, prev_basic_lineno = declared_arrays[name_key]
+                    prev_loc = f"[line {prev_basic_lineno}]" if prev_basic_lineno is not None else f"line {prev_lineno}"
+                    errmsg.error(
+                        lineno,
+                        f"Array '{name}' already dimensioned at {prev_loc}. Re-dimensioning is not supported.",
+                        fname=filename,
+                    )
+                else:
+                    declared_arrays[name_key] = (lineno, basic_line_no)
+                    dims_str = ", ".join(d.strip() for d in dims)
+                    spec_str = f" AS {type_spec}" if type_spec else ""
+                    hoisted_declarations.append(f"DIM {name}({dims_str}){spec_str}")
+
+            if not has_array_item:
+                kept_stmts.append(stmt_stripped)
+
+        if not had_dim:
+            new_lines.append(line)
+            continue
+
+        # Reconstruct the line
+        if kept_stmts:
+            reconstructed = line_prefix + ": ".join(kept_stmts)
+            if rem:
+                reconstructed += (": " if reconstructed else "") + rem
+            new_lines.append(reconstructed + line_ending)
+        else:
+            # All statements were DIM statements!
+            # Preserve the line number label for GOTO/GOSUB jump targets!
+            body = raw_line[len(line_prefix):].strip()
+            new_lines.append(f"{line_prefix}REM [hoisted] {body}{line_ending}")
+
+    if not hoisted_declarations:
+        return text
+
+    fname_escaped = filename.replace("\\", "/") if filename else ""
+    if fname_escaped and fname_escaped != "(stdin)":
+        hoist_header = f"{': '.join(hoisted_declarations)}\n#line 1 \"{fname_escaped}\"\n"
+    else:
+        hoist_header = f"{': '.join(hoisted_declarations)}\n#line 1\n"
+
+    return hoist_header + "".join(new_lines)
 
 
 def transform_sinclair_deffn(text: str) -> str:
@@ -546,48 +720,6 @@ def transform_input_statement(stmt: str) -> str:
     return prefix + ": ".join(result_actions)
 
 
-def split_line_statements(line: str) -> tuple[list[str], str]:
-    """Splits a line into statements separated by ':' outside quotes, and extracts any trailing REM comment."""
-    stmts = []
-    cur = []
-    i = 0
-    n = len(line)
-    rem = ""
-
-    while i < n:
-        ch = line[i]
-        if ch == '"':
-            cur.append(ch)
-            i += 1
-            while i < n:
-                cur.append(line[i])
-                if line[i] == '"':
-                    if i + 1 < n and line[i + 1] == '"':
-                        cur.append('"')
-                        i += 1
-                    else:
-                        break
-                i += 1
-        elif (
-            line[i:i + 4].upper() == "REM "
-            or line[i:i + 4].upper() == "REM\t"
-            or line[i:].upper() == "REM"
-        ):
-            rem = line[i:]
-            break
-        elif ch == ":":
-            stmts.append("".join(cur))
-            cur = []
-        else:
-            cur.append(ch)
-        i += 1
-
-    if cur:
-        stmts.append("".join(cur))
-
-    return stmts, rem
-
-
 def transform_sinclair_input(text: str) -> str:
     """Transforms Sinclair BASIC 'INPUT' statements into PRINT and __zxb_input_* calls.
     Preserves line numbers, string literals, and REM comments.
@@ -716,6 +848,7 @@ class BaseLexer:
                 if getattr(OPTIONS, "basinc", False):
                     self.input_data = filter_basinc_metadata(self.input_data)
                     self.input_data = transform_sinclair_dim(self.input_data)
+                    self.input_data = transform_hoist_sinclair_dims(self.input_data, filename)
                 self.input_data = transform_sinclair_deffn(self.input_data)
                 if (
                     getattr(OPTIONS, "jump_table_enabled", False)

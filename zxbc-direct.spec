@@ -21,6 +21,7 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+a.binaries = [x for x in a.binaries if not x[0].lower().startswith('api-ms-win') and not x[0].lower().startswith('ucrtbase')]
 pyz = PYZ(a.pure)
 
 exe = EXE(
