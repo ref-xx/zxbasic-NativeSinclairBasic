@@ -5,6 +5,9 @@
 # See https://www.gnu.org/licenses/agpl-3.0.html for details.
 # --------------------------------------------------------------------
 
+from src.api.tmp_labels import tmp_label
+
+from ._8bit import Bits8
 from .common import runtime_call
 from .exception import InvalidICError as InvalidIC
 from .quad import Quad
@@ -136,6 +139,30 @@ class String:
         output.append(runtime_call(RuntimeLabels.ADDSTR))
         output.extend(cls.free_sequence(tmp1, tmp2))
         output.append("push hl")
+        return output
+
+    @classmethod
+    def andstr(cls, ins: Quad) -> list[str]:
+        """Performs string AND condition (STR-&-NO).
+        ins[2] is the string operand.
+        ins[3] is the condition operand (8-bit boolean).
+        If condition != 0, returns the string in HL.
+        If condition == 0, frees temp string (if temporal) and returns NULL (0) in HL.
+        """
+        output = []
+        output.extend(Bits8.get_oper(ins[3]))
+        tmp1, str_oper = cls.get_oper(ins[2], no_exaf=True)
+        output.extend(str_oper)
+
+        lbl = tmp_label()
+        output.append("or a")
+        output.append(f"jr nz, {lbl}")
+        if tmp1:
+            output.append(runtime_call(RuntimeLabel.MEM_FREE))
+        output.append("ld hl, 0")
+        output.append(f"{lbl}:")
+        output.append("push hl")
+
         return output
 
     @classmethod

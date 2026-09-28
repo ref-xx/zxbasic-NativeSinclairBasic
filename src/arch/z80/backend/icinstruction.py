@@ -146,6 +146,7 @@ class ICInstruction(ICInstructionInterface):
     ANDI32 = "andi32"
     ANDF16 = "andf16"
     ANDF = "andf"
+    ANDSTR = "andstr"
     ORU8 = "oru8"
     ORI8 = "ori8"
     ORU16 = "oru16"

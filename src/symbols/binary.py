@@ -6,6 +6,7 @@
 # --------------------------------------------------------------------
 
 from src.api import check, errmsg
+from src.api.config import OPTIONS
 from src.symbols.constexpr import SymbolCONSTEXPR
 from src.symbols.number import SymbolNUMBER
 from src.symbols.string_ import SymbolSTRING
@@ -85,8 +86,38 @@ class SymbolBINARY(Symbol):
             "SHL",
             "SHR",
         } and not check.is_numeric(a, b):
-            errmsg.error(lineno, f"Operator {operator} cannot be used with strings")
-            return None
+            is_sinclair_str_and = (
+                operator == "AND"
+                and (OPTIONS.sinclair or getattr(OPTIONS, "basinc", False))
+                and a.type_ is not None
+                and b.type_ is not None
+                and TYPE.is_string(a.type_.final)
+                and (TYPE.is_numeric(b.type_.final) or b.type_.final == TYPE.boolean)
+            )
+            if not is_sinclair_str_and:
+                errmsg.error(lineno, f"Operator {operator} cannot be used with strings")
+                return None
+
+        if (
+            operator == "AND"
+            and (OPTIONS.sinclair or getattr(OPTIONS, "basinc", False))
+            and a.type_ is not None
+            and b.type_ is not None
+            and TYPE.is_string(a.type_.final)
+        ):
+            # STR-&-NO: X$ AND Y
+            # In Sinclair BASIC, returns X$ if Y is non-zero, and "" (null string) if Y is zero.
+            if b.type_.final != TYPE.boolean:
+                b = SymbolBINARY.make_node(
+                    "NE",
+                    b,
+                    SymbolNUMBER(0, lineno=lineno, type_=b.type_.final),
+                    lineno=lineno,
+                    func=lambda x, y: x != y,
+                )
+                if b is None:
+                    return None
+            return cls(operator, a, b, type_=TYPE.string, lineno=lineno, func=None)
 
         if operator not in {"AND", "OR", "XOR"}:
             # Non-boolean operators use always numeric operands.

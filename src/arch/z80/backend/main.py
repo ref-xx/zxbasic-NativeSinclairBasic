@@ -281,6 +281,7 @@ class Backend(BackendInterface):
             ICInstruction.ANDI32: ICInfo(3, Bits32.and32),  # x = A and B
             ICInstruction.ANDF16: ICInfo(3, Fixed16.andf16),  # x = A and B
             ICInstruction.ANDF: ICInfo(3, Float.andf),  # x = A and B
+            ICInstruction.ANDSTR: ICInfo(3, String.andstr),  # x = A$ and B
             ICInstruction.ORU8: ICInfo(3, Bits8.or8),  # x = A or B
             ICInstruction.ORI8: ICInfo(3, Bits8.or8),  # x = A or B
             ICInstruction.ORU16: ICInfo(3, Bits16.or16),  # x = A or B
