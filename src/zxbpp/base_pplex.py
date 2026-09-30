@@ -380,7 +380,10 @@ def transform_sinclair_string_arrays(text: str) -> str:
         if has_non_empty:
             rec = line_prefix + ": ".join(s.strip() for s in new_stmts if s.strip())
             if rem:
-                rec += ": " + rem
+                rem_idx = raw.rfind(rem)
+                before_rem = raw[:rem_idx].rstrip() if rem_idx != -1 else ""
+                sep = ": " if before_rem.endswith(":") else " "
+                rec += sep + rem
         else:
             rec = line_prefix + rem
 
@@ -979,6 +982,12 @@ class LexerState:
     input_data: str
 
 
+def is_library_file(filename: str) -> bool:
+    """Checks if a filename belongs to the standard library or runtime includes."""
+    norm = filename.replace("\\", "/").lower()
+    return "/stdlib/" in norm or "/lib/" in norm or norm.startswith("lib/") or "external/zxbcdirector" in norm
+
+
 class BaseLexer:
     """Own class lexer to allow multiple instances.
     This lexer is just a wrapper of the current FILESTACK[-1] lexer
@@ -1041,7 +1050,7 @@ class BaseLexer:
                 self.input_data = sys.stdin.read()
             else:
                 self.input_data = utils.read_txt_file(filename)
-            if filename == STDIN or filename.lower().endswith(".bas"):
+            if (filename == STDIN or filename.lower().endswith(".bas")) and not is_library_file(filename):
                 if getattr(OPTIONS, "basinc", False):
                     self.input_data = filter_basinc_metadata(self.input_data)
                     self.input_data = transform_sinclair_string_arrays(self.input_data)

@@ -28,8 +28,7 @@ REM ... unless the user has specified otherwise
 #include once <screen.bas>
 #include once <space.bas>
 
-REM This is not the original Sinclair INPUT, but better than nothing
-#include once <input.bas>
+REM Lightweight standalone Sinclair INPUT routine
 #include once <sinclair_input.bas>
 
 REM This needed to initialize USR "a" to a memory heap space
