@@ -192,6 +192,203 @@ def transform_dim_statement(dim_stmt: str) -> str:
     return prefix + ": ".join(statements)
 
 
+def find_to_in_slice(arg: str) -> bool:
+    """Checks if arg contains keyword TO at depth 0 outside strings."""
+    depth = 0
+    in_str = False
+    i = 0
+    n = len(arg)
+    while i < n:
+        ch = arg[i]
+        if ch == '"':
+            in_str = not in_str
+            i += 1
+        elif in_str:
+            i += 1
+        elif ch in "([{":
+            depth += 1
+            i += 1
+        elif ch in ")]}":
+            depth -= 1
+            i += 1
+        elif depth == 0:
+            if re.match(r"\bTO\b", arg[i:], re.IGNORECASE):
+                return True
+            i += 1
+        else:
+            i += 1
+    return False
+
+
+def transform_statement_string_arrays(stmt: str, str_array_dims: dict[str, int]) -> str:
+    """Transforms string array accesses in a single BASIC statement.
+    - Slicing: s$(x, 1 TO 32) -> s$(x)(1 TO 32)
+    - READ with slice: READ s$(x, 1 TO 32) -> READ s$(x)
+    - Indexing: s$(x, y) -> s$(x)(y) when s$ was dimensioned with 2+ Sinclair dimensions
+    """
+    # Skip DIM and DATA statements
+    if re.match(r"^\s*(?:\d+\s+)?(?:IF\s+.*?\bTHEN\s+)?(?:DIM|DATA)\b", stmt, re.IGNORECASE):
+        return stmt
+
+    is_read = bool(re.match(r"^\s*(?:\d+\s+)?READ\b", stmt, re.IGNORECASE))
+
+    res = []
+    i = 0
+    n = len(stmt)
+
+    while i < n:
+        ch = stmt[i]
+        if ch == '"':
+            res.append(ch)
+            i += 1
+            while i < n:
+                res.append(stmt[i])
+                if stmt[i] == '"':
+                    if i + 1 < n and stmt[i + 1] == '"':
+                        res.append('"')
+                        i += 1
+                    else:
+                        i += 1
+                        break
+                i += 1
+            continue
+
+        # Look for identifier ending with $ followed by (
+        m = re.match(r"([a-zA-Z_][a-zA-Z0-9_]*\$)\s*\(", stmt[i:])
+        if m:
+            ident = m.group(1)
+            ident_lower = ident.lower()
+            open_paren_idx = i + m.end() - 1
+
+            depth = 1
+            cur_arg = []
+            args = []
+            j = open_paren_idx + 1
+
+            while j < n and depth > 0:
+                c = stmt[j]
+                if c == '"':
+                    cur_arg.append(c)
+                    j += 1
+                    while j < n:
+                        cur_arg.append(stmt[j])
+                        if stmt[j] == '"':
+                            if j + 1 < n and stmt[j + 1] == '"':
+                                cur_arg.append('"')
+                                j += 1
+                            else:
+                                j += 1
+                                break
+                        j += 1
+                    continue
+                elif c in "([{":
+                    depth += 1
+                    cur_arg.append(c)
+                    j += 1
+                elif c in ")]}":
+                    depth -= 1
+                    if depth == 0:
+                        args.append("".join(cur_arg).strip())
+                        cur_arg = []
+                        j += 1
+                        break
+                    else:
+                        cur_arg.append(c)
+                        j += 1
+                elif c == "," and depth == 1:
+                    args.append("".join(cur_arg).strip())
+                    cur_arg = []
+                    j += 1
+                else:
+                    cur_arg.append(c)
+                    j += 1
+
+            if depth != 0:
+                res.append(ch)
+                i += 1
+                continue
+
+            transformed_args = [transform_statement_string_arrays(a, str_array_dims) for a in args]
+            has_slice = len(transformed_args) > 0 and find_to_in_slice(transformed_args[-1])
+            K = str_array_dims.get(ident_lower)
+
+            if has_slice:
+                if is_read:
+                    if len(transformed_args) > 1:
+                        res.append(f"{ident}({', '.join(transformed_args[:-1])})")
+                    else:
+                        res.append(ident)
+                else:
+                    if len(transformed_args) > 1:
+                        res.append(f"{ident}({', '.join(transformed_args[:-1])})({transformed_args[-1]})")
+                    else:
+                        res.append(f"{ident}({transformed_args[0]})")
+                i = j
+                continue
+            elif K is not None and len(transformed_args) == K and K >= 2:
+                res.append(f"{ident}({', '.join(transformed_args[:-1])})({transformed_args[-1]})")
+                i = j
+                continue
+            else:
+                res.append(f"{ident}({', '.join(transformed_args)})")
+                i = j
+                continue
+
+        res.append(ch)
+        i += 1
+
+    return "".join(res)
+
+
+def transform_sinclair_string_arrays(text: str) -> str:
+    """Scans for Sinclair string array accesses like s$(x, 1 TO 32) or s$(x, y)
+    and transforms them to Boriel ZX Basic syntax: s$(x)(1 TO 32) and s$(x)(y).
+    Preserves line numbers, string literals, and REM comments.
+    """
+    lines = text.splitlines(keepends=True)
+    str_array_dims: dict[str, int] = {}
+
+    for line in lines:
+        raw_line = line.rstrip("\r\n")
+        stmts, _ = split_line_statements(raw_line)
+        for stmt in stmts:
+            m_dim = re.search(r"\bDIM\s+(.*)$", stmt.strip(), re.IGNORECASE)
+            if m_dim:
+                raw_items = split_dim_items(m_dim.group(1))
+                for raw_item in raw_items:
+                    name, dims, _ = parse_dim_item(raw_item)
+                    if name and name.endswith("$") and dims and len(dims) >= 2:
+                        str_array_dims[name.lower()] = len(dims)
+
+    transformed_lines = []
+    for line in lines:
+        raw = line.rstrip("\r\n")
+        le = "\n" if line.endswith("\n") else ""
+        stmts, rem = split_line_statements(raw)
+        if not stmts:
+            transformed_lines.append(rem + le if rem else line)
+            continue
+
+        m_line_no = re.match(r"^(\s*\d+\s+)(.*)$", stmts[0])
+        line_prefix = m_line_no.group(1) if m_line_no else ""
+        if m_line_no:
+            stmts[0] = m_line_no.group(2)
+
+        new_stmts = [transform_statement_string_arrays(s, str_array_dims) if s.strip() else s for s in stmts]
+        has_non_empty = any(s.strip() for s in new_stmts)
+
+        if has_non_empty:
+            rec = line_prefix + ": ".join(s.strip() for s in new_stmts if s.strip())
+            if rem:
+                rec += ": " + rem
+        else:
+            rec = line_prefix + rem
+
+        transformed_lines.append(rec + le)
+
+    return "".join(transformed_lines)
+
+
 def transform_sinclair_dim(text: str) -> str:
     """Transforms Sinclair BASIC 'DIM v$(...)' statements for --basinc mode."""
     lines = text.splitlines(keepends=True)
@@ -847,6 +1044,7 @@ class BaseLexer:
             if filename == STDIN or filename.lower().endswith(".bas"):
                 if getattr(OPTIONS, "basinc", False):
                     self.input_data = filter_basinc_metadata(self.input_data)
+                    self.input_data = transform_sinclair_string_arrays(self.input_data)
                     self.input_data = transform_sinclair_dim(self.input_data)
                     self.input_data = transform_hoist_sinclair_dims(self.input_data, filename)
                 self.input_data = transform_sinclair_deffn(self.input_data)
