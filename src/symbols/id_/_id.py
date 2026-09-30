@@ -169,7 +169,7 @@ class SymbolID(SymbolIdABC):
 
     def to_vararray(self, bounds: SymbolBOUNDLIST) -> SymbolID:
         """Converts an id into a var array one"""
-        assert self.class_ == CLASS.unknown
+        assert self.class_ in (CLASS.unknown, CLASS.var)
         assert self.has_address or self.has_address is None
 
         self.has_address = True

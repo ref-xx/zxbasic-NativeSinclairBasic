@@ -535,10 +535,14 @@ def transform_hoist_sinclair_dims(text: str, filename: str = "") -> str:
                             f"Array '{name}' already dimensioned at {prev_loc}. Re-dimensioning is not supported.",
                             fname=filename,
                         )
-                    else:
                         declared_arrays[name_key] = (lineno, basic_line_no)
                         dims_str = ", ".join(d.strip() for d in dims)
-                        spec_str = f" AS {type_spec}" if type_spec else ""
+                        var_types = getattr(OPTIONS, "var_types", {})
+                        if not type_spec:
+                            vtype = var_types.get(name) or var_types.get(name.lower())
+                            spec_str = f" AS {vtype.upper()}" if vtype else ""
+                        else:
+                            spec_str = f" AS {type_spec}"
                         hoisted_declarations.append(f"DIM {name}({dims_str}){spec_str}")
                 kept_stmts.append(f"{then_prefix}REM [hoisted] DIM {dim_body}")
                 continue
@@ -568,7 +572,12 @@ def transform_hoist_sinclair_dims(text: str, filename: str = "") -> str:
                 else:
                     declared_arrays[name_key] = (lineno, basic_line_no)
                     dims_str = ", ".join(d.strip() for d in dims)
-                    spec_str = f" AS {type_spec}" if type_spec else ""
+                    var_types = getattr(OPTIONS, "var_types", {})
+                    if not type_spec:
+                        vtype = var_types.get(name) or var_types.get(name.lower())
+                        spec_str = f" AS {vtype.upper()}" if vtype else ""
+                    else:
+                        spec_str = f" AS {type_spec}"
                     hoisted_declarations.append(f"DIM {name}({dims_str}){spec_str}")
 
             if not has_array_item:

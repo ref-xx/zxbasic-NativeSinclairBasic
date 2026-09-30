@@ -234,6 +234,15 @@ class SymbolTable:
         if entry is None or entry.class_ in (CLASS.unknown, class_):  # Undeclared yet
             return True
 
+        var_types = getattr(OPTIONS, "var_types", {})
+        if (
+            class_ == CLASS.array
+            and entry.class_ == CLASS.var
+            and entry.lineno == 0
+            and (id_ in var_types or id_.lower() in var_types)
+        ):
+            return True
+
         if show_error:
             check.check_class(entry, class_, lineno)
 
@@ -722,12 +731,21 @@ class SymbolTable:
             entry = self.declare(id_, lineno, symbols.ID(name=id_, lineno=lineno, type_ref=type_))
             assert entry is not None
 
+        var_types = getattr(OPTIONS, "var_types", {})
+        is_custom_var = (
+            entry.lineno == 0
+            and (id_ in var_types or id_.lower() in var_types)
+        )
+
         if not entry.declared:
             if entry.callable:
                 syntax_error(
                     lineno, "Array '%s' must be declared before use. First used at line %i" % (id_, entry.lineno)
                 )
                 return None
+        elif is_custom_var:
+            entry.lineno = lineno
+            entry.filename = global_.FILENAME
         else:
             if entry.scope == SCOPE.parameter:
                 syntax_error(lineno, "variable '%s' already declared as a parameter at line %i" % (id_, entry.lineno))
@@ -736,7 +754,7 @@ class SymbolTable:
             return None
 
         if entry.type_ != self.basic_types[TYPE.unknown] and entry.type_ != type_:
-            if not type_.implicit:
+            if not type_.implicit and not is_custom_var:
                 syntax_error(
                     lineno,
                     "Array suffix for '%s' is for type '%s' but declared as '%s'" % (entry.name, entry.type_, type_),
@@ -745,6 +763,12 @@ class SymbolTable:
 
             type_.implicit = False
             type_ = entry.type_
+
+        if is_custom_var and type_.implicit:
+            vtype_name = var_types.get(id_) or var_types.get(id_.lower())
+            if vtype_name:
+                vtype = TYPE.from_name(vtype_name)
+                type_ = symbols.TYPEREF(self.basic_types[vtype], lineno, implicit=False)
 
         if type_.implicit:
             warning_implicit_type(lineno, id_, type_.name)
